@@ -14,42 +14,38 @@ from selenium.webdriver.common.by import By
 from streamlit_app import STREAMLIT_APPS
 
 
-BROWSER_PAGELOAD_TIMEOUT_SECONDS = float(
-    os.getenv("BROWSER_PAGELOAD_TIMEOUT_SECONDS", "5")
-)
-SITE_WAIT_SECONDS = float(os.getenv("SITE_WAIT_SECONDS", "25"))
-BUTTON_APPEAR_WAIT_SECONDS = float(os.getenv("BUTTON_APPEAR_WAIT_SECONDS", "12"))
-WAKE_INTERVAL_HOURS = float(os.getenv("WAKE_INTERVAL_HOURS", "10"))
-MAX_CONCURRENT_APPS = max(1, int(os.getenv("MAX_CONCURRENT_APPS", "5")))
-STATE_FILE = os.getenv("WAKE_STATE_FILE", "wakeup_state.json")
-LOG_FILE = os.getenv("WAKE_LOG_FILE", "wakeup_log.txt")
-CHROME_BINARY = os.getenv("CHROME_BINARY", "/usr/bin/chromium").strip()
-CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver").strip()
-CHROME_USER_DATA_DIR = os.getenv("CHROME_USER_DATA_DIR", "").strip()
-CHROME_PROFILE_DIRECTORY = os.getenv("CHROME_PROFILE_DIRECTORY", "").strip()
-ENFORCE_WAKE_INTERVAL = os.getenv("ENFORCE_WAKE_INTERVAL", "0").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
+# 🔥 Increased timings (important)
+BROWSER_PAGELOAD_TIMEOUT_SECONDS = 5
+SITE_WAIT_SECONDS = 90
+BUTTON_APPEAR_WAIT_SECONDS = 15
+WAKE_INTERVAL_HOURS = float(os.getenv("WAKE_INTERVAL_HOURS", "0"))
+MAX_CONCURRENT_APPS = 2
+
+STATE_FILE = "wakeup_state.json"
+LOG_FILE = "wakeup_log.txt"
+
+CHROME_BINARY = "/usr/bin/chromium"
+CHROMEDRIVER_PATH = "/usr/bin/chromedriver"
+
+ENFORCE_WAKE_INTERVAL = False
+
 
 SLEEP_TEXT_MARKERS = (
     "yes, get this app back up!",
     "this app has gone to sleep due to inactivity",
     "zzzz",
 )
+
 WAKE_BUTTON_LOCATORS = (
     (By.CSS_SELECTOR, "button[data-testid='wakeup-button-viewer']"),
     (By.CSS_SELECTOR, "button[data-testid='wakeup-button-owner']"),
     (By.CSS_SELECTOR, "button[data-testid='wakeup-button']"),
     (By.XPATH, "//button[normalize-space()='Yes, get this app back up!']"),
 )
+
 APP_CONTENT_SELECTORS = (
     "[data-testid='stAppViewContainer']",
     "[data-testid='stSidebar']",
-    "[data-testid='stHeader']",
-    "section.main",
     "main",
 )
 
@@ -57,218 +53,151 @@ UNIQUE_STREAMLIT_APPS = list(dict.fromkeys(STREAMLIT_APPS))
 LOG_LOCK = threading.Lock()
 
 
-def log_message(log_file, message: str) -> None:
+def log_message(log_file, message):
     timestamped = f"[{datetime.datetime.now()}] {message}"
     with LOG_LOCK:
         log_file.write(f"{timestamped}\n")
         log_file.flush()
-        print(timestamped, flush=True)
-
-
-def should_run_interval(log_file) -> bool:
-    if not ENFORCE_WAKE_INTERVAL or WAKE_INTERVAL_HOURS <= 0:
-        return True
-    if not os.path.exists(STATE_FILE):
-        return True
-
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as state_file:
-            state = json.load(state_file)
-        last_run_raw = state.get("last_run_utc")
-        if not last_run_raw:
-            return True
-
-        last_run = datetime.datetime.fromisoformat(last_run_raw)
-        if last_run.tzinfo is None:
-            last_run = last_run.replace(tzinfo=datetime.timezone.utc)
-
-        elapsed = datetime.datetime.now(datetime.timezone.utc) - last_run
-        if elapsed.total_seconds() < WAKE_INTERVAL_HOURS * 3600:
-            log_message(log_file, f"Skipping run; last run {elapsed} ago")
-            return False
-    except Exception:
-        return True
-
-    return True
-
-
-def write_state() -> None:
-    state = {"last_run_utc": datetime.datetime.now(datetime.timezone.utc).isoformat()}
-    with open(STATE_FILE, "w", encoding="utf-8") as state_file:
-        json.dump(state, state_file)
+        print(timestamped)
 
 
 def create_driver():
     options = Options()
-    options.page_load_strategy = "none"
-    if CHROME_BINARY:
-        options.binary_location = CHROME_BINARY
+    options.binary_location = CHROME_BINARY
+
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-background-networking")
-    options.add_argument("--disable-component-update")
-    options.add_argument("--disable-default-apps")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--dns-prefetch-disable")
-    options.add_argument("--disable-sync")
-    options.add_argument("--metrics-recording-only")
-    if CHROME_USER_DATA_DIR:
-        options.add_argument(f"--user-data-dir={CHROME_USER_DATA_DIR}")
-    if CHROME_PROFILE_DIRECTORY:
-        options.add_argument(f"--profile-directory={CHROME_PROFILE_DIRECTORY}")
+
     service = Service(executable_path=CHROMEDRIVER_PATH)
-    return webdriver.Chrome(service=service, options=options)  # pyright: ignore[reportCallIssue]
+    return webdriver.Chrome(service=service, options=options)
 
 
 def find_wake_button(driver):
     for locator in WAKE_BUTTON_LOCATORS:
         try:
             for button in driver.find_elements(*locator):
-                if button.is_displayed() and button.is_enabled():
+                if button.is_displayed():
                     return button
-        except Exception:
+        except:
             continue
     return None
 
 
-def sleep_marker_present(driver) -> bool:
-    button = find_wake_button(driver)
-    if button is not None:
+def sleep_marker_present(driver):
+    if find_wake_button(driver):
         return True
 
     try:
-        body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
-    except Exception:
-        body_text = ""
-
-    return any(marker in body_text for marker in SLEEP_TEXT_MARKERS)
-
-
-def click_wake_button_if_available(driver) -> bool:
-    button = find_wake_button(driver)
-    if button is None:
+        text = driver.find_element(By.TAG_NAME, "body").text.lower()
+    except:
         return False
 
-    driver.execute_script(
-        "arguments[0].scrollIntoView({block: 'center'});",
-        button,
-    )
+    return any(marker in text for marker in SLEEP_TEXT_MARKERS)
+
+
+def click_wake(driver):
+    btn = find_wake_button(driver)
+    if not btn:
+        return False
+
+    driver.execute_script("arguments[0].scrollIntoView();", btn)
+    time.sleep(1)
+
     try:
-        button.click()
-    except Exception:
-        driver.execute_script("arguments[0].click();", button)
+        btn.click()
+    except:
+        driver.execute_script("arguments[0].click();", btn)
+
     return True
 
 
-def app_content_loaded(driver) -> bool:
+def app_loaded(driver):
     try:
-        ready_state = driver.execute_script("return document.readyState") or ""
-    except Exception:
-        ready_state = ""
-
-    if ready_state not in {"interactive", "complete"}:
+        text = driver.find_element(By.TAG_NAME, "body").text.lower()
+    except:
         return False
 
-    try:
-        body_text = driver.find_element(By.TAG_NAME, "body").text.strip()
-    except Exception:
-        body_text = ""
-
-    lowered_body = body_text.lower()
-    if any(marker in lowered_body for marker in SLEEP_TEXT_MARKERS):
+    if any(marker in text for marker in SLEEP_TEXT_MARKERS):
         return False
 
-    if len(body_text) >= 40:
+    if len(text) > 100:
         return True
 
     try:
-        return any(driver.find_elements(By.CSS_SELECTOR, selector) for selector in APP_CONTENT_SELECTORS)
-    except Exception:
+        return any(driver.find_elements(By.CSS_SELECTOR, s) for s in APP_CONTENT_SELECTORS)
+    except:
         return False
 
 
-def check_site(url: str) -> tuple[str, str]:
+def check_site(url):
     driver = create_driver()
+
     try:
-        driver.set_page_load_timeout(BROWSER_PAGELOAD_TIMEOUT_SECONDS)
-        try:
-            driver.get(url)
-        except (TimeoutException, WebDriverException):
-            try:
-                driver.execute_script("window.stop();")
-            except Exception:
-                pass
+        driver.get(url)
 
         deadline = time.time() + SITE_WAIT_SECONDS
+
         while time.time() < deadline:
+
+            # 🔴 If sleeping → wake it
             if sleep_marker_present(driver):
-                button_deadline = time.time() + BUTTON_APPEAR_WAIT_SECONDS
-                while time.time() < button_deadline:
-                    if click_wake_button_if_available(driver):
-                        break
-                    time.sleep(1)
-                else:
-                    return "errors", "sleep markers found but wake button never appeared"
-                return "woken", "sleep marker found and wake button clicked"
 
-            if app_content_loaded(driver):
-                return "awake", "app content loaded"
+                if click_wake(driver):
+                    time.sleep(5)
+                    driver.refresh()
 
-            time.sleep(1)
+                    # 🔥 WAIT for real app load
+                    post_deadline = time.time() + 90
 
-        return "errors", "timed out waiting for app content or sleep marker"
+                    while time.time() < post_deadline:
+                        if app_loaded(driver):
+                            return "woken", "app fully loaded after wake"
+                        time.sleep(3)
+
+                    return "errors", "wake clicked but app did not load"
+
+            # ✅ Already awake
+            if app_loaded(driver):
+                return "awake", "app already running"
+
+            time.sleep(2)
+
+        return "errors", "timeout"
+
     finally:
         driver.quit()
 
 
-async def process_site(index: int, total: int, url: str, log_file, semaphore) -> tuple[str, str, str]:
-    async with semaphore:
-        log_message(log_file, f"Checking app {index}/{total}: {url}")
+async def process_site(index, total, url, log_file, sem):
+    async with sem:
+        log_message(log_file, f"Checking {index}/{total}: {url}")
         try:
             state, detail = await asyncio.to_thread(check_site, url)
-        except Exception as exc:
-            state, detail = "errors", f"unexpected error: {exc}"
+        except Exception as e:
+            state, detail = "errors", str(e)
         return url, state, detail
 
 
-async def main() -> None:
-    with open(LOG_FILE, "a", encoding="utf-8") as log_file:
-        log_message(log_file, "Execution started")
-        log_message(
-            log_file,
-            f"Configured wake interval: every {WAKE_INTERVAL_HOURS} hour(s)",
-        )
-        log_message(
-            log_file,
-            f"Configured concurrency: up to {min(MAX_CONCURRENT_APPS, len(UNIQUE_STREAMLIT_APPS))} app(s)",
-        )
+async def main():
+    with open(LOG_FILE, "a") as log_file:
 
-        if not should_run_interval(log_file):
-            log_message(log_file, "Execution finished")
-            return
+        log_message(log_file, "Execution started")
 
         summary = {"awake": 0, "woken": 0, "errors": 0}
-        total = len(UNIQUE_STREAMLIT_APPS)
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT_APPS)
+        sem = asyncio.Semaphore(MAX_CONCURRENT_APPS)
 
         tasks = [
-            asyncio.create_task(process_site(index, total, url, log_file, semaphore))
-            for index, url in enumerate(UNIQUE_STREAMLIT_APPS, start=1)
+            asyncio.create_task(process_site(i, len(UNIQUE_STREAMLIT_APPS), url, log_file, sem))
+            for i, url in enumerate(UNIQUE_STREAMLIT_APPS, 1)
         ]
 
         for task in asyncio.as_completed(tasks):
             url, state, detail = await task
             summary[state] += 1
 
-            if state == "awake":
-                log_message(log_file, f"App is already awake: {url} ({detail})")
-            elif state == "woken":
-                log_message(log_file, f"App was asleep and is now awake: {url} ({detail})")
-            else:
-                log_message(log_file, f"Wake check failed: {url} ({detail})")
+            log_message(log_file, f"{state.upper()}: {url} ({detail})")
 
-        write_state()
         log_message(log_file, f"Summary: {summary}")
         log_message(log_file, "Execution finished")
 
