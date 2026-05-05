@@ -1,12 +1,10 @@
 import asyncio
 import datetime
-import json
 import os
 import threading
 import time
 
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -14,53 +12,47 @@ from selenium.webdriver.common.by import By
 from streamlit_app import STREAMLIT_APPS
 
 
-# 🔥 Increased timings (important)
-BROWSER_PAGELOAD_TIMEOUT_SECONDS = 5
-SITE_WAIT_SECONDS = 90
-BUTTON_APPEAR_WAIT_SECONDS = 15
-WAKE_INTERVAL_HOURS = float(os.getenv("WAKE_INTERVAL_HOURS", "0"))
+# 🔥 CONFIG
+SITE_WAIT_SECONDS = 120
+POST_WAKE_WAIT = 150
 MAX_CONCURRENT_APPS = 2
-
-STATE_FILE = "wakeup_state.json"
-LOG_FILE = "wakeup_log.txt"
 
 CHROME_BINARY = "/usr/bin/chromium"
 CHROMEDRIVER_PATH = "/usr/bin/chromedriver"
 
-ENFORCE_WAKE_INTERVAL = False
+LOG_FILE = "wakeup_log.txt"
 
 
 SLEEP_TEXT_MARKERS = (
     "yes, get this app back up!",
-    "this app has gone to sleep due to inactivity",
+    "this app has gone to sleep",
     "zzzz",
 )
 
 WAKE_BUTTON_LOCATORS = (
-    (By.CSS_SELECTOR, "button[data-testid='wakeup-button-viewer']"),
-    (By.CSS_SELECTOR, "button[data-testid='wakeup-button-owner']"),
     (By.CSS_SELECTOR, "button[data-testid='wakeup-button']"),
-    (By.XPATH, "//button[normalize-space()='Yes, get this app back up!']"),
+    (By.XPATH, "//button[contains(., 'Yes')]"),
 )
 
-APP_CONTENT_SELECTORS = (
+APP_SELECTORS = (
     "[data-testid='stAppViewContainer']",
-    "[data-testid='stSidebar']",
+    "section.main",
     "main",
 )
 
-UNIQUE_STREAMLIT_APPS = list(dict.fromkeys(STREAMLIT_APPS))
 LOG_LOCK = threading.Lock()
 
 
-def log_message(log_file, message):
-    timestamped = f"[{datetime.datetime.now()}] {message}"
+# ---------------- LOGGING ----------------
+def log(log_file, msg):
+    timestamp = f"[{datetime.datetime.now()}] {msg}"
     with LOG_LOCK:
-        log_file.write(f"{timestamped}\n")
+        log_file.write(timestamp + "\n")
         log_file.flush()
-        print(timestamped)
+        print(timestamp)
 
 
+# ---------------- DRIVER ----------------
 def create_driver():
     options = Options()
     options.binary_location = CHROME_BINARY
@@ -69,33 +61,54 @@ def create_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
 
-    service = Service(executable_path=CHROMEDRIVER_PATH)
-    return webdriver.Chrome(service=service, options=options)
+    return webdriver.Chrome(
+        service=Service(CHROMEDRIVER_PATH),
+        options=options
+    )
 
 
+# ---------------- DETECTION ----------------
 def find_wake_button(driver):
     for locator in WAKE_BUTTON_LOCATORS:
         try:
-            for button in driver.find_elements(*locator):
-                if button.is_displayed():
-                    return button
+            for btn in driver.find_elements(*locator):
+                if btn.is_displayed():
+                    return btn
         except:
             continue
     return None
 
 
-def sleep_marker_present(driver):
+def is_sleeping(driver):
     if find_wake_button(driver):
         return True
 
     try:
         text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        return any(marker in text for marker in SLEEP_TEXT_MARKERS)
     except:
         return False
 
-    return any(marker in text for marker in SLEEP_TEXT_MARKERS)
+
+def is_loaded(driver):
+    try:
+        # Strong detection: UI exists
+        for selector in APP_SELECTORS:
+            if driver.find_elements(By.CSS_SELECTOR, selector):
+                return True
+
+        # Fallback: no sleep text = likely loading or ready
+        text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if "zzzz" not in text and "sleep" not in text:
+            return True
+
+    except:
+        return False
+
+    return False
 
 
+# ---------------- ACTION ----------------
 def click_wake(driver):
     btn = find_wake_button(driver)
     if not btn:
@@ -112,24 +125,7 @@ def click_wake(driver):
     return True
 
 
-def app_loaded(driver):
-    try:
-        text = driver.find_element(By.TAG_NAME, "body").text.lower()
-    except:
-        return False
-
-    if any(marker in text for marker in SLEEP_TEXT_MARKERS):
-        return False
-
-    if len(text) > 100:
-        return True
-
-    try:
-        return any(driver.find_elements(By.CSS_SELECTOR, s) for s in APP_CONTENT_SELECTORS)
-    except:
-        return False
-
-
+# ---------------- CORE ----------------
 def check_site(url):
     driver = create_driver()
 
@@ -141,37 +137,38 @@ def check_site(url):
         while time.time() < deadline:
 
             # 🔴 If sleeping → wake it
-            if sleep_marker_present(driver):
+            if is_sleeping(driver):
 
-                if click_wake(driver):
-                    time.sleep(5)
-                    driver.refresh()
+                for attempt in range(2):  # retry twice
+                    if click_wake(driver):
+                        time.sleep(5)
+                        driver.refresh()
 
-                    # 🔥 WAIT for real app load
-                    post_deadline = time.time() + 90
+                        post_deadline = time.time() + POST_WAKE_WAIT
 
-                    while time.time() < post_deadline:
-                        if app_loaded(driver):
-                            return "woken", "app fully loaded after wake"
-                        time.sleep(3)
+                        while time.time() < post_deadline:
+                            if is_loaded(driver):
+                                return "woken", "app loaded after wake"
+                            time.sleep(3)
 
-                    return "errors", "wake clicked but app did not load"
+                return "woken", "wake triggered (app still starting)"
 
             # ✅ Already awake
-            if app_loaded(driver):
-                return "awake", "app already running"
+            if is_loaded(driver):
+                return "awake", "already running"
 
             time.sleep(2)
 
-        return "errors", "timeout"
+        return "errors", "timeout waiting for response"
 
     finally:
         driver.quit()
 
 
-async def process_site(index, total, url, log_file, sem):
+# ---------------- ASYNC ----------------
+async def process(index, total, url, log_file, sem):
     async with sem:
-        log_message(log_file, f"Checking {index}/{total}: {url}")
+        log(log_file, f"Checking {index}/{total}: {url}")
         try:
             state, detail = await asyncio.to_thread(check_site, url)
         except Exception as e:
@@ -182,24 +179,23 @@ async def process_site(index, total, url, log_file, sem):
 async def main():
     with open(LOG_FILE, "a") as log_file:
 
-        log_message(log_file, "Execution started")
+        log(log_file, "Execution started")
 
         summary = {"awake": 0, "woken": 0, "errors": 0}
         sem = asyncio.Semaphore(MAX_CONCURRENT_APPS)
 
         tasks = [
-            asyncio.create_task(process_site(i, len(UNIQUE_STREAMLIT_APPS), url, log_file, sem))
-            for i, url in enumerate(UNIQUE_STREAMLIT_APPS, 1)
+            asyncio.create_task(process(i, len(STREAMLIT_APPS), url, log_file, sem))
+            for i, url in enumerate(STREAMLIT_APPS, 1)
         ]
 
         for task in asyncio.as_completed(tasks):
             url, state, detail = await task
             summary[state] += 1
+            log(log_file, f"{state.upper()}: {url} ({detail})")
 
-            log_message(log_file, f"{state.upper()}: {url} ({detail})")
-
-        log_message(log_file, f"Summary: {summary}")
-        log_message(log_file, "Execution finished")
+        log(log_file, f"Summary: {summary}")
+        log(log_file, "Execution finished")
 
 
 if __name__ == "__main__":
