@@ -1,46 +1,50 @@
 name: Wake Up Streamlit Apps
 
 on:
-  push:
-    branches:
-      - main
   schedule:
-      - cron: "0 * * * *"
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: wake-streamlit
+  cancel-in-progress: true
 
 jobs:
   wake-up:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
     env:
       WAKE_INTERVAL_HOURS: "10"
       ENFORCE_WAKE_INTERVAL: "1"
       WAKE_STATE_FILE: "wakeup_state.json"
-    
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Restore wake state cache
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: wakeup_state.json
           key: wakeup-state-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            wakeup-state-${{ runner.os }}-
+            wakeup-state-${{ runner.os }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.10"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Run Python script to wake up Streamlit apps
+      - name: Run Python script
         run: python wake_up_streamlit.py
 
-      - name: Upload log file as artifact
-        uses: actions/upload-artifact@v6
+      - name: Upload log file
+        uses: actions/upload-artifact@v4
         with:
           name: wakeup-log
           path: wakeup_log.txt
+          retention-days: 1
