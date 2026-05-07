@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   wake-up:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     env:
@@ -21,10 +21,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Restore wake state cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: wakeup_state.json
           key: wakeup-state-${{ runner.os }}-${{ github.run_id }}
@@ -32,9 +32,9 @@ jobs:
             wakeup-state-${{ runner.os }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: "3.10"
+          python-version: "3.x"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -43,7 +43,7 @@ jobs:
         run: python wake_up_streamlit.py
 
       - name: Upload log file
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: wakeup-log
           path: wakeup_log.txt
