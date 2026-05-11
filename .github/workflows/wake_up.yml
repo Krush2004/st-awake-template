@@ -1,54 +1,46 @@
 name: Wake Up Streamlit Apps
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: "0 * * * *"
-  workflow_dispatch:
-
-concurrency:
-  group: wake-streamlit
-  cancel-in-progress: true
+      - cron: "0 * * * *"
 
 jobs:
   wake-up:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    env:
+      WAKE_INTERVAL_HOURS: "5"
+      ENFORCE_WAKE_INTERVAL: "1"
+      WAKE_STATE_FILE: "wakeup_state.json"
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Restore wake state cache
+        uses: actions/cache@v5
+        with:
+          path: wakeup_state.json
+          key: wakeup-state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            wakeup-state-${{ runner.os }}-
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.x"
 
-      - name: Install Chromium & ChromeDriver
+      - name: Install dependencies
         run: |
-          sudo apt-get update
+          pip install -r requirements.txt
 
-          sudo apt-get install -y \
-            chromium-browser \
-            chromium-chromedriver
-
-          which chromium-browser
-          which chromedriver
-
-      - name: Install Python dependencies
-        run: |
-          pip install selenium
-
-      - name: Run wake script
+      - name: Run Python script to wake up Streamlit apps
         run: python wake_up_streamlit.py
 
-      - name: Show logs
-        run: |
-          echo "=========== LOGS ==========="
-          cat wakeup_log.txt
-
-      - name: Upload log file
-        uses: actions/upload-artifact@v5
+      - name: Upload log file as artifact
+        uses: actions/upload-artifact@v6
         with:
           name: wakeup-log
           path: wakeup_log.txt
-          retention-days: 1
