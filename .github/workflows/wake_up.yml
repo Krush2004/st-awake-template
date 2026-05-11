@@ -47,7 +47,7 @@ jobs:
           cat wakeup_log.txt
 
       - name: Upload log file
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: wakeup-log
           path: wakeup_log.txt
