@@ -2,7 +2,7 @@ name: Wake Up Streamlit Apps
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -12,10 +12,10 @@ concurrency:
 jobs:
   wake-up:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     env:
-      WAKE_INTERVAL_HOURS: "10"
+      WAKE_INTERVAL_HOURS: "5"
       ENFORCE_WAKE_INTERVAL: "1"
       WAKE_STATE_FILE: "wakeup_state.json"
 
