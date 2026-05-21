@@ -21,7 +21,7 @@ jobs:
       ENFORCE_WAKE_INTERVAL: "0"
       WAKE_STATE_FILE: "wakeup_state.json"
 
-      CHROME_BINARY: "/usr/bin/chromium-browser"
+      CHROME_BINARY: "/usr/bin/google-chrome"
       CHROMEDRIVER_PATH: "/usr/bin/chromedriver"
 
     steps:
@@ -41,16 +41,21 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Chromium and ChromeDriver
+      # Install Chrome (NOT chromium-browser)
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      # Install matching ChromeDriver
+      - name: Setup ChromeDriver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Verify browser install
         run: |
-          sudo apt-get update
+          which google-chrome
+          google-chrome --version
 
-          sudo apt-get install -y \
-            chromium-browser \
-            chromium-chromedriver
-
-          which chromium-browser
           which chromedriver
+          chromedriver --version
 
       - name: Install dependencies
         run: |
