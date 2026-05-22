@@ -4,27 +4,19 @@ on:
   push:
     branches:
       - main
-
   schedule:
     - cron: "0 * * * *"
-
   workflow_dispatch:
 
 jobs:
   wake-up:
     runs-on: ubuntu-latest
-
     timeout-minutes: 15
-
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
       WAKE_INTERVAL_HOURS: "1"
-      ENFORCE_WAKE_INTERVAL: "0"
+      ENFORCE_WAKE_INTERVAL: "1"
       WAKE_STATE_FILE: "wakeup_state.json"
-
-      CHROME_BINARY: "/usr/bin/google-chrome"
-      CHROMEDRIVER_PATH: "/usr/bin/chromedriver"
 
     steps:
       - name: Checkout repository
@@ -44,35 +36,41 @@ jobs:
           python-version: "3.11"
 
       - name: Setup Chrome
-        uses: browser-actions/setup-chrome@latest
-
-      - name: Setup ChromeDriver
-        uses: nanasess/setup-chromedriver@v2
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v2.1.2
+        with:
+          install-chromedriver: true
 
       - name: Verify browser install
         run: |
-          which google-chrome
-          google-chrome --version
-
-          which chromedriver
-          chromedriver --version
+          "${{ steps.setup-chrome.outputs.chrome-path }}" --version
+          "${{ steps.setup-chrome.outputs.chromedriver-path }}" --version
 
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install selenium
 
       - name: Run Python script to wake up Streamlit apps
+        env:
+          CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
+          CHROMEDRIVER_PATH: ${{ steps.setup-chrome.outputs.chromedriver-path }}
         run: python wake_up_streamlit.py
 
       - name: Show logs
+        if: always()
         run: |
           echo "=========== LOGS ==========="
-          cat wakeup_log.txt
+          if [ -f wakeup_log.txt ]; then
+            cat wakeup_log.txt
+          else
+            echo "wakeup_log.txt was not created"
+          fi
 
       - name: Upload log file as artifact
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: wakeup-log
           path: wakeup_log.txt
           retention-days: 1
+          if-no-files-found: warn
