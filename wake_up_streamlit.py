@@ -59,11 +59,11 @@ WAKE_BUTTON_LOCATORS = (
     (By.XPATH, "//button[normalize-space()='Yes, get this app back up!']"),
 )
 APP_CONTENT_SELECTORS = (
+    "[data-testid='stApp']",
+    "[data-testid='stMain']",
     "[data-testid='stAppViewContainer']",
     "[data-testid='stSidebar']",
     "[data-testid='stHeader']",
-    "section.main",
-    "main",
 )
 
 UNIQUE_STREAMLIT_APPS = list(dict.fromkeys(STREAMLIT_APPS))
