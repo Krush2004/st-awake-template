@@ -197,7 +197,7 @@ def app_content_loaded(driver) -> bool:
     if any(marker in lowered_body for marker in NOT_APP_CONTENT_MARKERS):
         return False
 
-    if len(body_text) >= 40:
+    if len(body_text) >= 150:
         return True
 
     try:
