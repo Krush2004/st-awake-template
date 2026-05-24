@@ -117,6 +117,13 @@ WAKE_INTERVAL_HOURS=10
 
 to reduce unnecessary executions.
 
+---
+## Shoutout
+
+Special thanks to **@Aditya190803** for creating and maintaining this project template.
+
+Also thanks to all contributors helping improve automation, workflows, and reliability for Streamlit applications ❤️
+
 ## License
 
 MIT License
